@@ -4,7 +4,7 @@ close all; clear all; clc;
 %% Crane Control %% 
 
 
-q_eq = [pi/6; pi/3; pi/6; 1; 0; 0]; 
+q_eq = [pi/6; pi/3; -pi/6; 1; 0; 0]; %%%% 1 is the length of cable 
 
 I_tot=250;   l_B=2.5;     m_B=300;     I_B=156.25;     l_J=2;     m_J=250;     I_J=85;     g=9.81;       m=90;
 
@@ -30,10 +30,10 @@ dth5  =q_eqdot(6);
 u_eq = [                               0;
 (g*l_B*cos(th2)*(2*m + m_B + 2*m_J))/2;
      (g*l_J*cos(th3)*(2*m + m_J))/2;
-             -g*m*cos(th4)*cos(th5)];
+             -g*m*cos(th4)*cos(th5)];           %% gravity compensation term taken from the gravity effect G in the dynamics function but without two last terms because not actuable
 
 
-x_eq = [zeros(6,1); pi/6; pi/3; -pi/6; 0.5; 0; 0] % [qdot_eq; q_eq]
+x_eq = [zeros(6,1); pi/6; pi/3; -pi/6; 0.5; 0; 0] % [qdot_eq; q_eq] so speeds set to zero because equilibrium point and cable =  0.5m
 
 
 %[X_eq, u, y, dx] = trim('crane_model_21_05', x_eq, u_eq);   %%%%not useful just to check that we indeed have equilibrium at gravity compensation
@@ -66,7 +66,7 @@ x_d = [0;
       pi/10;
       0.01;
       0;
-      0] + x_eq;
+      0] + x_eq
 
 %% LQR Control %% 
 % Lets now do a full state feedback with feedforward term for ref tracking
@@ -74,12 +74,13 @@ x_d = [0;
 % The general idea: x_dot = 0 at steady state and y = C*x = r 
 
 x0 = x_eq;
-diagQ = ones(12,1);
-diagR = ones(4,1);
+diagQ = ones(12,1);         %% Multiplies the states so 12x12 
+diagR = ones(4,1);          %% Multiplies input so 4x4
 Q = diag(diagQ);
 R = diag(diagR);
 
-% Tuning Q and R matrixes to assess good performances: 
+% Tuning Q and R matrixes to assess good performances: this tuning shows we
+% really want to penalize the behavior and not the input
 
 Q = diag([0.1, 0.1, 0.1, 0.1, 5000, 5000, 100, 100000, 1000000, 100000, 100, 100]);
 R = diag([0.001, 0.01, 0.001, 0.001]);
@@ -87,7 +88,7 @@ R = diag([0.001, 0.01, 0.001, 0.001]);
 K = lqr(A, B, Q, R);
 
 % Lets now compute N
-C_dague = pinv(C);  
+C_dague = pinv(C)  
 B_dague = pinv(B);
 N = K*C_dague - B_dague * A * C_dague;  
 
@@ -97,6 +98,8 @@ poles = eig(A)
 poles_CL = eig(A - B*K) % OK our lqr stabilized our system :3
 
 
+Matrix_speed = [eye(6, 12); zeros(6, 12)]
+Matrix_pos = diag([zeros(1, floor(12/2)), ones(1, ceil(12/2))])
 
 
 

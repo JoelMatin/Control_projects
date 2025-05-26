@@ -4,7 +4,7 @@ close all; clear all; clc;
 %% Crane Control %% 
 
 
-q_eq = [pi/6; pi/3; -pi/6; 1; 0; 0]; %%%% 1 is the length of cable 
+q_eq = [pi/6; pi/3; -pi/6; 0.5; 0; 0]; %%%% 1 is the length of cable 
 
 I_tot=250;   l_B=2.5;     m_B=300;     I_B=156.25;     l_J=2;     m_J=250;     I_J=85;     g=9.81;       m=90;
 
@@ -38,7 +38,7 @@ x_eq = [zeros(6,1); pi/6; pi/3; -pi/6; 0.5; 0; 0] % [qdot_eq; q_eq] so speeds se
 
 %[X_eq, u, y, dx] = trim('crane_model_21_05', x_eq, u_eq);   %%%%not useful just to check that we indeed have equilibrium at gravity compensation
 
-[A, B, C, D] = linmod('crane_model_21_05', x_eq, u_eq)    %C and D cannot be computed in this model since our output is the state itself
+[Alin, Blin, C, D] = linmod('crane_model_21_05', x_eq, u_eq)    %C and D cannot be computed in this model since our output is the state itself
 
 
 % C = eye(12);% Since we want the output (yn) to be our state: yn = I*xn +[0]un
@@ -46,6 +46,16 @@ x_eq = [zeros(6,1); pi/6; pi/3; -pi/6; 0.5; 0; 0] % [qdot_eq; q_eq] so speeds se
 % No need for this now i've cooked
 
 sys_linearized = ss(A, B, C, D);
+
+load("Ajacobian.mat"); 
+load("Bjacobian.mat"); 
+C = eye(12);% Since we want the output (yn) to be our state: yn = I*xn +[0]un
+D = zeros(12, 4);   % See above
+sys_linearized = ss(A, B, C, D)
+
+A-Alin
+B-Blin
+
 
 
 

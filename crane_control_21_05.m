@@ -1,31 +1,18 @@
 close all; clear all; clc; 
 
+%%% Crane Control %%% 
 
-%% Crane Control %% 
-
-
-q_eq = [pi/6; pi/3; -pi/6; 0.5; 0; 0]; %%%% 1 is the length of cable 
 
 I_tot=250;   l_B=2.5;     m_B=300;     I_B=156.25;     l_J=2;     m_J=250;     I_J=85;     g=9.81;       m=90;
 
-th1 = q_eq(1);
-th2 = q_eq(2);
-th3 = q_eq(3);
-d6  = q_eq(4);
-th4 = q_eq(5);
-th5 = q_eq(6);
+x_eq = [zeros(6,1); pi/6; pi/3; -pi/6; 0.5; 0; 0] ; % [qdot_eq; q_eq] so speeds set to zero because equilibrium point and cable =  0.5m
 
-q_eqdot = zeros(6, 1);
-dth1 = q_eqdot(1);
-dth2 = q_eqdot(2);
-dth3 = q_eqdot(3);
-dd6  = q_eqdot(4);
-dth4 = q_eqdot(5);
-dth5  =q_eqdot(6);
-
-
-
-%% Linearization %%
+th1 = x_eq(7);
+th2 = x_eq(8);
+th3 = x_eq(9);
+d6  = x_eq(10);
+th4 = x_eq(11);
+th5 = x_eq(12);
 
 u_eq = [                               0;
 (g*l_B*cos(th2)*(2*m + m_B + 2*m_J))/2;
@@ -33,37 +20,30 @@ u_eq = [                               0;
              -g*m*cos(th4)*cos(th5)];           %% gravity compensation term taken from the gravity effect G in the dynamics function but without two last terms because not actuable
 
 
-x_eq = [zeros(6,1); pi/6; pi/3; -pi/6; 0.5; 0; 0] % [qdot_eq; q_eq] so speeds set to zero because equilibrium point and cable =  0.5m
+% %% Linearization using linmod %%
+% 
+% %[X_eq, u, y, dx] = trim('crane_model_21_05', x_eq, u_eq);   %%%%not useful just to check that we indeed have equilibrium at gravity compensation
+% 
+% [Alin, Blin, C, D] = linmod('crane_model_21_05', x_eq, u_eq)    %C and D cannot be computed in this model since our output is the state itself
+% 
+% sys_linearized = ss(Alin, Blin, C, D);
 
-
-%[X_eq, u, y, dx] = trim('crane_model_21_05', x_eq, u_eq);   %%%%not useful just to check that we indeed have equilibrium at gravity compensation
-
-[Alin, Blin, C, D] = linmod('crane_model_21_05', x_eq, u_eq)    %C and D cannot be computed in this model since our output is the state itself
-
-
-% C = eye(12);% Since we want the output (yn) to be our state: yn = I*xn +[0]un
-% D = zeros(12, 4);   % See above
-% No need for this now i've cooked
-
-sys_linearized = ss(A, B, C, D);
+%% Linearization using Jacobian analxtic derivation
 
 load("Ajacobian.mat"); 
 load("Bjacobian.mat"); 
-C = eye(12);% Since we want the output (yn) to be our state: yn = I*xn +[0]un
+
+C = eye(12);        % Since we want the output (yn) to be our state: yn = I*xn +[0]un
 D = zeros(12, 4);   % See above
-sys_linearized = ss(A, B, C, D)
+sys_linearized_jac = ss(A, B, C, D); 
 
-A-Alin
-B-Blin
-
-
-
+% Indeed both ways give the same matrices
+% A-Alin
+% B-Blin
 
 %% Reference 
 % Moving a little bit compared to the eq values since we are linearizing
 % around this eq point
-
-
 
 x_d = [0;
        0;
@@ -107,15 +87,176 @@ N = K*C_dague - B_dague * A * C_dague;
 poles = eig(A)
 poles_CL = eig(A - B*K) % OK our lqr stabilized our system :3
 
-
+%%% Matrices to separate the speed states from the position states in the
+%%% simulink scopes
 Matrix_speed = [eye(6, 12); zeros(6, 12)]
 Matrix_pos = diag([zeros(1, floor(12/2)), ones(1, ceil(12/2))])
 
+%%% Results: LQR indeed controls the crane both in linearized (with and
+%%% without jacobian ) and in real model but we have: steady state error,
+%%% oscillations for both posiitons and speed and a long rising time for
+%%% the q1
 
 
 
 %% Kalman filter %%
 % The aim here is to try to estimate each state depending on the
 % observations we do. Since our model doesn't represent the reality.
+clc; 
+
+% %%% Covariance of input process disturbance and output sensor noise
+Q = 100 * eye(4); 
+R = 0.1 * eye(12);  
+
+plant_disturbed = ss(A, [B B], C, [D D]); 
+
+[kalmf, L, P, Mx, Z] = kalman(plant_disturbed, Q, R);
+kalmf = kalmf(13:end,:); %%% disregard the ys because they're just the states*1
+
+plant_disturbed.InputName = {'u1', 'u2', 'u3', 'u4', 'w1', 'w2', 'w3', 'w4'};
+plant_disturbed.OutputName = {'xt(1)', 'xt(2)', 'xt(3)', 'xt(4)', 'xt(5)', 'xt(6)', 'xt(7)', 'xt(8)', 'xt(9)', 'xt(10)', 'xt(11)', 'xt(12)'};
+vIn = sumblk('x = xt + v', 12);         %% define output corrupted by noise 
+
+kalmf.InputName = {'u1', 'u2', 'u3', 'u4', 'x(1)', 'x(2)', 'x(3)', 'x(4)', 'x(5)', 'x(6)', 'x(7)', 'x(8)', 'x(9)', 'x(10)', 'x(11)', 'x(12)'};
+kalmf.OutputName = {'xe(1)', 'xe(2)', 'xe(3)', 'xe(4)', 'xe(5)', 'xe(6)', 'xe(7)', 'xe(8)', 'xe(9)', 'xe(10)', 'xe(11)', 'xe(12)'};    %% estimated states 
+
+% Define LQR controller: u = -K*xe + N*x_ref
+lqr_controller = ss([-K N]); % Static gain for u = -K*xe + N*x_ref
+lqr_controller.InputName = {'xe(1)', 'xe(2)', 'xe(3)', 'xe(4)', 'xe(5)', 'xe(6)', ...
+                            'xe(7)', 'xe(8)', 'xe(9)', 'xe(10)', 'xe(11)', 'xe(12)', ...
+                            'x_ref(1)', 'x_ref(2)', 'x_ref(3)', 'x_ref(4)', 'x_ref(5)', 'x_ref(6)', ...
+                            'x_ref(7)', 'x_ref(8)', 'x_ref(9)', 'x_ref(10)', 'x_ref(11)', 'x_ref(12)'};
+lqr_controller.OutputName = {'u1', 'u2', 'u3', 'u4'};
+
+% Connect the system
+plant_filtered = connect(plant_disturbed, vIn, kalmf, lqr_controller, ...
+    {'w1', 'w2', 'w3', 'w4', 'v(1)', 'v(2)', 'v(3)', 'v(4)', 'v(5)', 'v(6)', ...
+     'v(7)', 'v(8)', 'v(9)', 'v(10)', 'v(11)', 'v(12)', ...
+     'x_ref(1)', 'x_ref(2)', 'x_ref(3)', 'x_ref(4)', 'x_ref(5)', 'x_ref(6)', ...
+     'x_ref(7)', 'x_ref(8)', 'x_ref(9)', 'x_ref(10)', 'x_ref(11)', 'x_ref(12)'}, ...
+    {'xt(1)', 'xt(2)', 'xt(3)', 'xt(4)', 'xt(5)', 'xt(6)', ...
+     'xt(7)', 'xt(8)', 'xt(9)', 'xt(10)', 'xt(11)', 'xt(12)', ...
+     'xe(1)', 'xe(2)', 'xe(3)', 'xe(4)', 'xe(5)', 'xe(6)', ...
+     'xe(7)', 'xe(8)', 'xe(9)', 'xe(10)', 'xe(11)', 'xe(12)'});
+
+%% Input Signals generation
+
+t_vec = (0:0.1:50)';
+n = length(t_vec);
+x_eq_traj = zeros(12, n);
+
+q_eq1 = zeros(6, 1); 
+q_eq2 = [pi/6; pi/3; pi/6; 0.5; 0; 0];
+q_eq3 = [pi/3; pi/6; pi/4; 1; 0; 0]; 
+% q_eq4 = [pi/6; pi/3; pi/3; 0.5; 0; 0]; 
+q_eqs = [q_eq1, q_eq2]; 
+
+% Time points for equilibrium configurations
+t_eqs = zeros(1, size(q_eqs, 2)); 
+for i = 2:length(t_eqs)
+    t_eqs(i) = 0 + (i)*max(t_vec)/length(t_eqs); 
+end
+
+% x_eq_traj(7, :) = interp1(t_eqs, q_eqs(1,:), t_vec, 'linear');
+% x_eq_traj(8, :) = interp1(t_eqs, q_eqs(2,:), t_vec, 'linear');
+% x_eq_traj(9, :) = interp1(t_eqs, q_eqs(3,:), t_vec, 'linear');
+% x_eq_traj(10, :) = interp1(t_eqs, q_eqs(4,:), t_vec, 'linear');
+% x_eq_traj(11, :) = interp1(t_eqs, q_eqs(5,:), t_vec, 'linear');
+% x_eq_traj(12, :) = interp1(t_eqs, q_eqs(6,:), t_vec, 'linear');
+
+for i = 7:size(x_eq_traj, 1)
+    x_eq_traj(i, :) = q_eq2(i-6).*ones(1, 501);
+end  
+
+% Noise signals
+rng(10, 'twister');
+% Process noise w: 4x1, covariance Q
+L_Q = chol(Q, 'lower'); % Cholesky decomposition
+w = 0.5*L_Q * randn(4, n); % 4xn noise
+% Measurement noise v: 12x1, covariance R
+L_R = chol(R, 'lower'); % Cholesky decomposition
+v = 0.5*L_R * randn(12, n); % 12xn noise
+
+
+
+% Plotting
+figure(2)
+
+% Subplot for x_eq (configuration states)
+% subplot(4, 1, 1);
+plot(t_vec, x_eq_traj(7, :), 'b-', 'LineWidth', 1.5, 'DisplayName', '\theta_1');
+hold on;
+plot(t_vec, x_eq_traj(8, :), 'r-', 'LineWidth', 1.5, 'DisplayName', '\theta_2');
+plot(t_vec, x_eq_traj(9, :), 'g-', 'LineWidth', 1.5, 'DisplayName', '\theta_3');
+plot(t_vec, x_eq_traj(10, :), 'k-', 'LineWidth', 1.5, 'DisplayName', 'cable');hold on; 
+plot(t_vec, x_eq_traj(11, :), 'm-', 'LineWidth', 1.5, 'DisplayName', '\theta_4');
+plot(t_vec, x_eq_traj(12, :), 'c-', 'LineWidth', 1.5, 'DisplayName', '\theta_5');
+hold off; 
+title('Equilibrium State Trajectory');
+xlabel('Time (s)');
+ylabel('State Value');
+legend('show', 'Location', 'best');
+grid on;
+
+
+% 
+% % Subplot 3: Process noise w
+% subplot(4, 1, 3);
+% plot(t_vec, w(1, :), 'b-', 'LineWidth', 1.5, 'DisplayName', 'w_1');
+% hold on;
+% plot(t_vec, w(2, :), 'r-', 'LineWidth', 1.5, 'DisplayName', 'w_2');
+% plot(t_vec, w(3, :), 'g-', 'LineWidth', 1.5, 'DisplayName', 'w_3');
+% plot(t_vec, w(4, :), 'k-', 'LineWidth', 1.5, 'DisplayName', 'w_4');
+% hold off;
+% title('Process Noise');
+% xlabel('Time (s)');
+% ylabel('Noise Amplitude');
+% legend('show', 'Location', 'best');
+% grid on;
+% 
+% % Subplot 4: Measurement noise v (plotting first 4 components to avoid clutter)
+% subplot(4, 1, 4);
+% plot(t_vec, v(1, :), 'b-', 'LineWidth', 1.5, 'DisplayName', 'v_1');
+% hold on;
+% plot(t_vec, v(2, :), 'r-', 'LineWidth', 1.5, 'DisplayName', 'v_2');
+% plot(t_vec, v(3, :), 'g-', 'LineWidth', 1.5, 'DisplayName', 'v_3');
+% plot(t_vec, v(4, :), 'k-', 'LineWidth', 1.5, 'DisplayName', 'v_4');
+% hold off;
+% title('Measurement Noise (First 4 Components)');
+% xlabel('Time (s)');
+% ylabel('Noise Amplitude');
+% legend('show', 'Location', 'best');
+% grid on;
+
+
+%% Simulation with lsim
+% Combine inputs: [w; v; x_ref]
+U = [w; v; x_eq_traj]; % 28xn input vector: [4 process noise + 12 measurement noise + 12 reference]
+
+% Initial condition
+x0 = zeros(12, 1); % Initial state for plant
+x0_kalman = zeros(12, 1); % Initial state for Kalman filter
+X0 = [x0; x0_kalman]; % Combined initial condition
+
+% Simulate the system
+[Y, T, X] = lsim(plant_filtered, U, t_vec, X0);
+
+% Extract true and estimated states
+xt = Y(:, 1:12); % True states (xt(1) to xt(12))
+xe = Y(:, 13:24); % Estimated states (xe(1) to xe(12))
+
+% Plotting Results
+figure(6);
+i = 7;
+plot(t_vec, 180*xt(:, i)/pi, 'b-', 'LineWidth', 1.5, 'DisplayName', 'True');
+hold on;
+plot(t_vec, 180*xe(:, i)/pi, 'r--', 'LineWidth', 1.5, 'DisplayName', 'Estimated');
+plot(t_vec, 180*x_eq_traj(i, :)/pi, 'g:', 'LineWidth', 1, 'DisplayName', 'Reference');
+hold off;
+title(['State x(', num2str(i), ')']);
+xlabel('Time (s)');
+ylabel(['x_', num2str(i), '(degrees)']);
+legend('show');
+grid on;
 
 

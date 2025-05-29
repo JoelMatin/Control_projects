@@ -1,0 +1,140 @@
+clear all; close all; clc; 
+
+I_tot=250;   l_B=2.5;     m_B=300;     I_B=156.25;     l_J=2;     m_J=250;     I_J=85;     g=9.81;       m=90;
+
+x_eq = [zeros(6,1); pi/6; pi/3; -pi/6; 0.5; 0; 0] ; % [qdot_eq; q_eq] so speeds set to zero because equilibrium point and cable =  0.5m
+
+th1 = x_eq(7);
+th2 = x_eq(8);
+th3 = x_eq(9);
+d6  = x_eq(10);
+th4 = x_eq(11);
+th5 = x_eq(12);
+
+u_eq = [                               0;
+(g*l_B*cos(th2)*(2*m + m_B + 2*m_J))/2;
+     (g*l_J*cos(th3)*(2*m + m_J))/2;
+             -g*m*cos(th4)*cos(th5)];           %% gravity compensation term taken from the gravity effect G in the dynamics function but without two last terms because not actuable
+
+
+
+x_d = [0;
+       0;
+       0;
+       0;
+       0;
+       0;
+      pi/10;
+      pi/10;
+      pi/10;
+      0.01;
+      0;
+      0] + x_eq; 
+
+
+
+%% LQR 
+
+[A, B] = jacobian_crane(x_eq, u_eq); 
+C = eye(12);        % Since we want the output (yn) to be our state: yn = I*xn +[0]un
+D = zeros(12, 4);   % See above
+sys_linearized_jac = ss(A, B, C, D); 
+
+Q = diag([0.1, 0.1, 0.1, 0.1, 5000, 5000, 100, 100000, 1000000, 100000, 100, 100]);
+    R = diag([0.001, 0.01, 0.001, 0.001]);
+K = lqr(A, B, Q, R);
+
+%% Linear Kalman filter to a fixed position
+
+[xe_history, xt_history, u_history] = Kalman_filter(kalmf, A, B, C, D, K, t_vec, w, v, x_eq); 
+
+% Plot results ith state
+figure;
+subplot(3,1,1);
+i = 7
+plot(t, xt_history(i,:), 'b-', 'DisplayName', 'True State (xt(i))');
+hold on;
+plot(t, xe_history(i,:), 'r--', 'DisplayName', 'Estimated State (xe(i))');
+xlabel('Time (s)');
+ylabel('State 1');
+legend;
+title('True vs Estimated States');
+
+subplot(3,1,2);
+plot(t, xt_history(i,:) - xe_history(i,:), 'k-', 'DisplayName', 'Estimation Error');
+xlabel('Time (s)');
+ylabel('Error (xt(1) - xe(1))');
+legend;
+
+subplot(3,1,3);
+plot(t, u_history(1,:), 'g-', 'DisplayName', 'Control Input (u(i))');
+xlabel('Time (s)');
+ylabel('Control Input 1');
+legend;
+
+%% Trajectory
+
+t_vec = (0:0.1:50)';
+n = length(t_vec);
+x_eq_traj = zeros(12, n);
+
+q_eq1 = zeros(6, 1); 
+q_eq2 = x_eq(7:end); %[pi/6; pi/3; -pi/6; 0.5; 0; 0];
+q_eq3 = [pi/3; pi/6; -pi/4; 1; 0; 0]; 
+q_eq4 = [pi/6; pi/3; -pi/3; 0.5; 0; 0]; 
+q_eqs = [q_eq1, q_eq2]; %, q_eq3, q_eq4]; 
+
+% Time points for equilibrium configurations
+t_eqs = zeros(1, size(q_eqs, 2)); 
+for i = 2:length(t_eqs)
+    t_eqs(i) = 0 + (i)*max(t_vec)/length(t_eqs); 
+end
+
+x_eq_traj(7, :) = interp1(t_eqs, q_eqs(1,:), t_vec, 'linear');
+x_eq_traj(8, :) = interp1(t_eqs, q_eqs(2,:), t_vec, 'linear');
+x_eq_traj(9, :) = interp1(t_eqs, q_eqs(3,:), t_vec, 'linear');
+x_eq_traj(10, :) = interp1(t_eqs, q_eqs(4,:), t_vec, 'linear');
+x_eq_traj(11, :) = interp1(t_eqs, q_eqs(5,:), t_vec, 'linear');
+x_eq_traj(12, :) = interp1(t_eqs, q_eqs(6,:), t_vec, 'linear');
+
+% for i = 7:size(x_eq_traj, 1)
+%     x_eq_traj(i, :) = q_eq2(i-6).*ones(1, 501);
+% end  
+
+% Plotting
+figure(2)
+
+% Subplot for x_eq (configuration states)
+% subplot(4, 1, 1);
+plot(t_vec, x_eq_traj(7, :), 'b-', 'LineWidth', 1.5, 'DisplayName', '\theta_1');
+hold on;
+plot(t_vec, x_eq_traj(8, :), 'r-', 'LineWidth', 1.5, 'DisplayName', '\theta_2');
+plot(t_vec, x_eq_traj(9, :), 'g-', 'LineWidth', 1.5, 'DisplayName', '\theta_3');
+plot(t_vec, x_eq_traj(10, :), 'k-', 'LineWidth', 1.5, 'DisplayName', 'cable');hold on; 
+plot(t_vec, x_eq_traj(11, :), 'm-', 'LineWidth', 1.5, 'DisplayName', '\theta_4');
+plot(t_vec, x_eq_traj(12, :), 'c-', 'LineWidth', 1.5, 'DisplayName', '\theta_5');
+hold off; 
+title('Equilibrium State Trajectory');
+xlabel('Time (s)');
+ylabel('State Value');
+legend('show', 'Location', 'best');
+grid on;
+
+% Generate process and sensor noise (piecewise constant for ode15)
+
+% %%% Covariance of input process disturbance and output sensor noise
+Qw = 1 * eye(4); 
+Rv = 1 * eye(12);  
+rng(0); % For reproducibility
+n_noise = size(Qw, 2);
+n_meas = size(Rv, 2);
+n_steps = length(t_vec); 
+w = sqrt(Qw) * randn(n_noise, n_steps); % Process noise
+v = sqrt(Rv) * randn(n_meas, n_steps); % Sensor nois
+x_eq_traj = x_eq_traj(1:end, 2)
+
+%% Extend kalman filter for trajectory of different xeq's 
+clc; 
+[xe_total, xt_total] = Extended_kalman_filter(w, v, x_eq_traj, Qw, Rv); 
+
+
